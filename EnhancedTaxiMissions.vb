@@ -15,12 +15,12 @@ Public Class EnhancedTaxiMissions
 
     Public TestBlip(500) As Blip
 
-    Public ShowDebugInfo As Boolean = False
+    Public ShowDebugInfo As Boolean = True
     Public ToggleKey As Keys = Keys.L
     Public UnitsInKM As Boolean = True
     Public doAutosave As Boolean = False
     Public CustomLimousine As String = ""
-    Public ValidCars() As String = {"ASEA", "ASTEROPE", "BUFFALO", "BUFFALO2", "DILETT", "EMPEROR", "EXEMPLAR", "FELON", "FUGITIVE", "INGOT", "INTRUDER", "JACKAL", "ORACLE", "ORACLE2", "PREMIER", "PRIMO", "SCHAFTER2", "STANIER", "STRATUM", "SULTAN", "SUPERD", "SURGE", "TAILGATER", "TAXI", "WASHINGTON", "STRETCH", "GLENDALE", "WARRENER", "KURUMA", "PRIMO2", "COG55", "COGNOSCENTI", "LIMO2", "SCHAFTER3", "SCHAFTER4", "BALLER", "BALLER2", "BJXL", "CAVALCADE", "CAVALCADE2", "GRESLEY", "DUBSTA", "FQ2", "HABANERO", "LANDSTALKER", "MESA", "MINIVAN", "PATRIOT", "RADI", "ROCOTO", "SEMINOLE", "SERRANO", "YOUGA", "HUNTLEY", "MOONBEAM", "BALLER3", "BALLER4", "BALLER5", "BALLER6"}
+    Public ValidCars() As String = {"ASEA", "ASTEROPE", "BUFFALO", "BUFFALO2", "DILETT", "EMPEROR", "EXEMPLAR", "FELON", "FUGITIVE", "INGOT", "INTRUDER", "JACKAL", "ORACLE", "ORACLE2", "PREMIER", "PRIMO", "SCHAFTER2", "STANIER", "STRATUM", "SULTAN", "SUPERD", "SURGE", "TAILGATER", "TAXI", "WASHINGTON", "STRETCH", "GLENDALE", "WARRENER", "KURUMA", "PRIMO2", "COG55", "COGNOSCENTI", "LIMO2", "SCHAFTER3", "SCHAFTER4", "BALLER", "BALLER2", "BJXL", "CAVALCADE", "CAVALCADE2", "GRESLEY", "DUBSTA", "FQ2", "HABANERO", "LANDSTALKER", "MESA", "MINIVAN", "PATRIOT", "RADI", "ROCOTO", "SEMINOLE", "SERRANO", "YOUGA", "HUNTLEY", "MOONBEAM", "BALLER3", "BALLER4", "BALLER5", "BALLER6", "GRANGER"}
 
     Public isMinigameActive As Boolean = False
     Public MiniGameStage As MiniGameStages = MiniGameStages.Standby
@@ -97,6 +97,21 @@ Public Class EnhancedTaxiMissions
 
     Public updateDist1 As Boolean = False
     Public updateDist2 As Boolean = False
+
+    Public consecutiveFares As Integer = 0
+    Public FareBonus As Integer = 0
+    Public BonusMsg As String = "BONUS-TEXT-INIT"
+	Public TotalEarned As Integer = 0
+
+	Public warningStartTime As Integer
+	Public warningEndTime As Integer
+	Public justExited As Integer = 0
+
+	Public isBlitzPricing As Boolean = False
+	Public blitzMultiplier As Integer = 1
+	Public blitzStartTime As Integer
+	Public blitzEndTime As Integer
+	Public calculateNextBlitz As Integer
 
     Public Enum MiniGameStages
         Standby                 '0
@@ -205,6 +220,7 @@ Public Class EnhancedTaxiMissions
         'CustomerRelationshipGroup = GTA.Native.Function.Call(Of Integer)(Native.Hash.ADD_RELATIONSHIP_GROUP, "TaxiPassengers", 0)
         World.SetRelationshipBetweenGroups(Relationship.Respect, CustomerRelationshipGroup.GetHashCode, "PLAYER".GetHashCode)
         World.SetRelationshipBetweenGroups(Relationship.Respect, "PLAYER".GetHashCode, CustomerRelationshipGroup.GetHashCode)
+		calculateNextBlitz = Game.GameTime + (1000)
 
     End Sub
 
@@ -368,7 +384,8 @@ Public Class EnhancedTaxiMissions
         If Game.Player.Character.IsInVehicle = True And Game.Player.Character.CurrentVehicle.DisplayName = "TAXI" Then
             headerText = "Taxi Driver"
         Else
-            headerText = "Limousine Driver"
+			' EDITED
+            headerText = "Yfir Driver"
         End If
         UI.Items.Add(New UIText(headerText, New Point(3, 1), 0.5, UItext_White, 1, False))
 
@@ -388,7 +405,10 @@ Public Class EnhancedTaxiMissions
                 Else
                     col = Color.Green
                 End If
-                UI.Items.Add(New UIText(s.ToString, New Point(175, 0), 0.5, col, 4, True))
+				' EDITED human readable remaining time
+				Dim sSpan As TimeSpan = TimeSpan.FromSeconds(s)
+				Dim humanreadableS As DateTime = New DateTime(sSpan.Ticks)
+				UI.Items.Add(New UIText(humanreadableS.ToString(("mm:ss")), New Point(156, 0), 0.5, col, 4, False))
             End If
         Else
             UI.Items.Add(New UIText(IngameHour.ToString("D2") & ":" & IngameMinute.ToString("D2"), New Point(156, 0), 0.5, UItext_White, 4, False))
@@ -415,6 +435,17 @@ Public Class EnhancedTaxiMissions
         Else
             UI.Items.Add(New UIText(UI_Destination & UI_Dist2, New Point(3, 68), 0.35F, UItext_Dark, 4, False))
         End If
+
+		'========== BLITZ STATUS
+		'UI.Items.Add(New UIRectangle(New Point(190, 0), New Size(20, 20), UIColor_Status))
+		UI.Items.Add(New UIRectangle(New Point(95, -20), New Size(95, 20), UIColor_Status))
+		Dim UI_BlitzStatus As String = "x" & BlitzMultiplier
+		If BlitzMultiplier = 1 Then
+			UI.Items.Add(New UIText(UI_BlitzStatus, New Point(156, -20), 0.35F, UItext_Dark, 4, False))
+		Else
+			UI.Items.Add(New UIText(UI_BlitzStatus, New Point(156, -20), 0.35F, UItext_White, 4, False))
+		End If
+
 
         UI.Draw()
 
@@ -455,8 +486,11 @@ Public Class EnhancedTaxiMissions
         checkIfItsTimeToLoadSettings()
         checkIfMinigameIsActive()
 
+		checkIfPlayerHasExitedVehicle()
 
-        If isMinigameActive Then
+		checkIfItsTimeToBlitzSMS()
+
+        If isMinigameActive And Game.Player.Character.IsInVehicle Then
             updateIngameTime()
             updateDistances()
             updateRoutes()
@@ -490,7 +524,7 @@ Public Class EnhancedTaxiMissions
 
     'MINOR UPDATES
     Public Sub updateDistances()
-
+		
         If isMinigameActive = False Then Exit Sub
 
         If Origin IsNot Nothing Then
@@ -547,29 +581,29 @@ Public Class EnhancedTaxiMissions
 
     Public Sub updateRoutes()
 
-        'If MiniGameStage = MiniGameStages.DrivingToOrigin Then
-        'GTA.Native.Function.Call(Native.Hash.SET_BLIP_ROUTE, OriginBlip, True)
-        'OriginBlip.ShowRoute = True
-        'End If
+        If MiniGameStage = MiniGameStages.DrivingToOrigin Then
+            GTA.Native.Function.Call(Native.Hash.SET_BLIP_ROUTE, OriginBlip, True)
+            OriginBlip.ShowRoute = True
+        End If
 
-        'If MiniGameStage = MiniGameStages.DrivingToDestination Then
-        'GTA.Native.Function.Call(Native.Hash.SET_BLIP_ROUTE, DestinationBlip, True)
-        'DestinationBlip.ShowRoute = True
-        'End If
+        If MiniGameStage = MiniGameStages.DrivingToDestination Then
+            GTA.Native.Function.Call(Native.Hash.SET_BLIP_ROUTE, DestinationBlip, True)
+            DestinationBlip.ShowRoute = True
+        End If
 
         'Exit Sub
 
-        If IngameMinute Mod 2 = 0 Then
-            If MiniGameStage = MiniGameStages.DrivingToOrigin Then
-                OriginBlip.ShowRoute = False
-                OriginBlip.ShowRoute = True
-            End If
-
-            If MiniGameStage = MiniGameStages.DrivingToDestination Then
-                DestinationBlip.ShowRoute = False
-                DestinationBlip.ShowRoute = True
-            End If
-        End If
+        'If IngameMinute Mod 2 = 0 Then
+        '    If MiniGameStage = MiniGameStages.DrivingToOrigin Then
+        '        OriginBlip.ShowRoute = False
+        '        OriginBlip.ShowRoute = True
+        '    End If
+'
+'            If MiniGameStage = MiniGameStages.DrivingToDestination Then
+'                DestinationBlip.ShowRoute = False
+'                DestinationBlip.ShowRoute = True
+'            End If
+'        End If
     End Sub
 
     Public Sub updateIngameTime()
@@ -628,7 +662,9 @@ Public Class EnhancedTaxiMissions
     Public Sub checkIfPlayerIsRoaming()
         If MiniGameStage <> MiniGameStages.RoamingForFare Then Exit Sub
 
-        If Game.Player.Character.IsInVehicle = False Then Exit Sub
+        ' TODO: 20 second grace period
+		' TODONE? SEE: checkHasPlayerExitedVehicle
+		' If Game.Player.Character.IsInVehicle = False Then Exit Sub
 
         Dim p As Ped = World.GetClosestPed(Game.Player.Character.CurrentVehicle.Position + (Game.Player.Character.CurrentVehicle.ForwardVector * 40) + New Vector3(RND.Next(-10, 10), RND.Next(-10, 10), RND.Next(-10, 10)), 35.0F)
         If p = Nothing Then Exit Sub
@@ -665,7 +701,8 @@ Public Class EnhancedTaxiMissions
     End Sub
 
     Public Sub checkIfPlayerIsWanted()
-        If Game.Player.WantedLevel > 0 Then
+	    'EDITED 2 stars? as many as you want and customers flee but the minigame doesnt end?
+        If Game.Player.WantedLevel > 2 Then
             EndMinigame(True)
         End If
     End Sub
@@ -967,17 +1004,125 @@ Public Class EnhancedTaxiMissions
         End If
     End Sub
 
+    Public Sub checkIfPlayerHasExitedVehicle()
+	    If isMiniGameActive = False Then Exit Sub
+		If Game.Player.Character.IsInVehicle = False Then
+			If justExited = 0 Then
+				justExited = 1
+				warningStartTime = Game.GameTime
+				warningEndTime = warningStartTime + 20000
+				PRINT(warningStartTime & " - " & warningEndTime)
+				GTA.UI.ShowSubtitle("~b~Return to a vehicle in 20 seconds, or taxi missions will end!")
+			End If
+            Dim remainder As Integer = warningEndTime - Game.GameTime
+            Dim s As Integer
+            s = CInt(remainder / 1000)
+			UI.Items.Clear()
+			UI.Items.Add(New UIRectangle(New Point(0, 27), New Size(190, 20), UIcolor_Status))
+            UI.Items.Add(New UIText(s, New Point(156,28), 3.5F, Color.Red, 4, False))
+			UI.Draw()
+			If Game.GameTime > warningEndTime
+				GTA.UI.ShowSubtitle("~r~You took too long - taxi missions ended!")
+				EndMiniGame()
+			End If
+		End If
+		If justExited = 1 And Game.Player.Character.IsInVehicle = True Then
+			justExited = 0
+            If CustomerPed.Exists = True And MiniGameStage <> MiniGameStages.DrivingToDestination Then
+                Dim isPed1Sitting As Boolean = GTA.Native.Function.Call(Of Boolean)(Native.Hash.IS_PED_IN_VEHICLE, CustomerPed, Game.Player.Character.CurrentVehicle, False)
+                If isPed1Sitting = False Then
+					CustomerPed.Task.EnterVehicle(Game.Player.Character.CurrentVehicle, 2, 16000)
+				    GTA.UI.ShowSubtitle("~b~Wait for your customer(s)...")
+			    End If
+					
+					
+				Dim isPed2Sitting As Boolean
+				Dim isPed3Sitting As Boolean
+
+				If isThereASecondCustomer = True And MiniGameStage <> MiniGameStages.DrivingToDestination Then
+                    isPed2Sitting = GTA.Native.Function.Call(Of Boolean)(Native.Hash.IS_PED_IN_VEHICLE, Customer2Ped, Game.Player.Character.CurrentVehicle, False)
+                    If isPed2Sitting = False Then Customer2Ped.Task.EnterVehicle(Game.Player.Character.CurrentVehicle, 1, 16000)
+                End If
+
+                If isThereAThirdCustomer = True And MiniGameStage <> MiniGameStages.DrivingToDestination Then
+                    isPed3Sitting = GTA.Native.Function.Call(Of Boolean)(Native.Hash.IS_PED_IN_VEHICLE, Customer3Ped, Game.Player.Character.CurrentVehicle, False)
+                    If isPed3Sitting = False Then Customer3Ped.Task.EnterVehicle(Game.Player.Character.CurrentVehicle, 0, 16000)
+			    End If
+
+			End If
+		End If
+	End Sub
 
 
+	Public Sub CheckIfItsTimeToBlitzSMS()
+		If Game.Player.CanStartMission = False Then Exit Sub
 
+		If Game.GameTime < calculateNextBlitz Then Exit Sub
 
+		updateInGameTime()
 
+        Dim maybeBlitzPricing As Integer = 1
+		' 1 = 1x   - no blitz
+		' 2 = 2x - baby blitz
+		' 3 = 3x - blitz blitz
+		' 4 = 4x - crazy blitz
+        Select Case IngameDay
+            Case Is > 4
+                Select Case IngameHour
+                    Case 0 To 3
+                        maybeBlitzPricing = 4
+                    Case 4 To 5
+                        maybeBlitzPricing = 1
+                    Case 6 To 10
+                        maybeBlitzPricing = 2
+                    Case 11 To 13
+                        maybeBlitzPricing = 1
+                    Case 14 To 17
+                        maybeBlitzPricing = 2
+                    Case 18 To 23
+                        maybeBlitzPricing = 3
+                End Select
+            Case Else
+                Select Case IngameHour
+                    Case 0
+                        maybeBlitzPricing = 4
+                    Case 1 To 5
+						maybeBlitzPricing = 2
+                    Case 6 To 10
+                        maybeBlitzPricing = 1
+                    Case 11 To 14
+                        maybeBlitzPricing = 1
+                    Case 15 To 18
+                        maybeBlitzPricing = 2
+                    Case 19 To 22
+                        maybeBlitzPricing = 3
+                    Case 23
+                        maybeBlitzPricing = 4
+				End Select
+			End Select
+		If maybeBlitzPricing > 1 Then
+			Dim r As Integer = RND.Next(0, 2)
+			If r < 2 Then
+				isBlitzPricing = True
+				blitzMultiplier = maybeBlitzPricing
+				blitzStartTime = Game.GameTime
+				Dim blitzMinutesRemaining As Integer = RND.Next(120,240)
+				blitzEndTime = blitzStartTime + (60 * blitzMinutesRemaining * 1000)
+				Dim blCustomerSMSMessage As String
+				blCustomerSMSMessage = "it's busy out there, and we need Yfir drivers, so BLITZ PRICING!!! (all fares multiplied x" & blitzMultiplier & ")"
+				Native.Function.Call(Native.Hash._SET_NOTIFICATION_TEXT_ENTRY, "STRING")
+				Native.Function.Call(Native.Hash._ADD_TEXT_COMPONENT_STRING, blCustomerSMSMessage)
+				Native.Function.Call(Native.Hash._0x531B84E7DA981FB6, "CHAR_DEFAULT", "CHAR_SOCIAL_CLUB", false, 7, "~b~Driver Bot", "~c~BLITZ pricing in effect", 1.0f, "___YFIR", 8)
 
-
+			End If
+		End If
+		calculateNextBlitz = Game.GameTime + (60 * 10 * 1000)
+	End Sub
+			
     'TOGGLES
     Public Sub ToggleMinigame(ByVal sender As Object, ByVal k As KeyEventArgs) Handles MyBase.KeyUp
 
-        If Game.Player.CanStartMission = False Then Exit Sub
+		If Game.Player.CanStartMission = False Then Exit Sub
 
         If k.KeyCode = ToggleKey Then
 
@@ -1008,16 +1153,15 @@ Public Class EnhancedTaxiMissions
                             End If
                         Next
                     Else
-                        GTA.UI.Notify("Please select a better vehicle.")
+						GTA.UI.Notify("Please select a better vehicle.")
                     End If
 
                 Else
                     GTA.UI.Notify("Taxi missions can only be started in a vehicle that can seat 3 passengers.")
                 End If
-
             End If
-        End If
-
+		End If
+		
     End Sub
 
     Public Sub StartMinigame()
@@ -1054,6 +1198,7 @@ Public Class EnhancedTaxiMissions
 
         MiniGameStage = MiniGameStages.Standby
 
+        justExited = 0
 
         If Game.Player.Character.IsInVehicle = True Then
             If Game.Player.Character.CurrentVehicle.DisplayName = "TAXI" Then
@@ -1132,7 +1277,7 @@ Public Class EnhancedTaxiMissions
                     Customer3Ped.Task.FleeFrom(Game.Player.Character)
                 End If
                 Customer3Ped.MarkAsNoLongerNeeded()
-                If Ped3Blip IsNot Nothing Then
+				If Ped3Blip IsNot Nothing Then
                     If Ped3Blip.Exists Then
                         Ped3Blip.Remove()
                         Ped3Blip = Nothing
@@ -1147,6 +1292,12 @@ Public Class EnhancedTaxiMissions
         End If
 
         isMinigameActive = False
+
+		Dim StatsMessage As String = "Consecutive Fares: " & consecutiveFares & " - Total Earnings: " & TotalEarned
+
+		GTA.UI.ShowSubtitle(StatsMessage,7000)
+		consecutiveFares = 0
+		TotalEarned = 0
 
         'DeleteTestBlips()
 
@@ -1201,9 +1352,43 @@ Public Class EnhancedTaxiMissions
         PRINT("Percent " & FareTipPercent & " ARR: " & DestinationArrivalTime - ArrivalWindowStart)
 
         FareTip = FareTotal * FareTipPercent
+		' EDITED celebrity bonus tip?
+		If Customer.isCeleb And FareTipPercent > 39 Then
+            Dim r As Integer
+			r = RND.Next(0, 2)
+			If r > 0 Then
+				FareTip = FareTotal + 100
+				GTA.UI.ShowSubtitle("Damn- that was fast! I already tipped thru the app, but here's another $100!")
+			End If
+		End If
     End Sub
 
-
+	' EDITED
+	Public Sub calculateBonus()
+		Select Case consecutiveFares
+			Case 0 to 2
+				BonusMsg = 3 - consecutiveFares & " fare(s) left until next bonus"
+				FareBonus = 0
+			Case 3
+				BonusMsg = "3 fare bonus: $250!!!"
+				FareBonus = 250
+			Case 4 to 6
+				BonusMsg = 7 - consecutiveFares & " fare(s) left until next bonus!"
+				FareBonus = 0
+			Case 7
+				BonusMsg = "7 fare bonus: $500!!!"
+				FareBonus = 500
+			Case 8 to 9
+				BonusMsg = 10 - consecutiveFares & " fares until MEGABONUS!"
+				FareBonus = 0
+			Case 10
+				BonusMsg = "$1,000 bonus and UNLOCKED MEGA BONUS!!!"
+				FareBonus = 1000
+			Case 11 to 99
+				FareBonus = 1000 + ( 250 * ( consecutiveFares - 1 )) ' $1k + $250 for every fare over 10
+				BonusMsg = "MEGA BONUS $" & FareBonus & " PAYOUT!!!"
+		End Select
+	End Sub
 
 
     'CONDITIONS MET
@@ -1251,11 +1436,20 @@ Public Class EnhancedTaxiMissions
 
         GTA.Native.Function.Call(Native.Hash.FLASH_MINIMAP_DISPLAY)
 
-
+		
         'SpawnTestBlips()
 
         updateDist1 = True
         MiniGameStage = MiniGameStages.DrivingToOrigin
+
+		Native.Function.Call(Native.Hash._SET_NOTIFICATION_TEXT_ENTRY, "STRING")
+		Dim NewCustomerSMSMessage As String
+		NewCustomerSMSMessage = "a new pickup is waiting @ " & Origin.name & ", headed to " & Destination.name & "."
+		Native.Function.Call(Native.Hash._ADD_TEXT_COMPONENT_STRING, NewCustomerSMSMessage)
+		Native.Function.Call(Native.Hash._0x531B84E7DA981FB6, "CHAR_DEFAULT", "CHAR_SOCIAL_CLUB", false, 7, "~b~Driver Bot", "~c~New Fare Notification", 1.0f, "___YFIR", 8)
+		Native.Function.Call(Native.Hash._DRAW_NOTIFICATION, false, false)
+		'Native.Function.Call(Native.Hash.PLAY_SOUND_FRONTEND, -1, "Text_Arrive_Tone", &g_382E, 1)
+
     End Sub
 
     Private Sub StartRoamingMission()
@@ -1685,6 +1879,42 @@ Public Class EnhancedTaxiMissions
         If isThereASecondCustomer = True Then
             UI_DispatchStatus = "Please drive the customers to their destination"
         End If
+
+        Select Case Destination.Type
+            Case LocationType.AirportArrive
+		        GTA.UI.ShowSubtitle("Passenger: Picking up a friend at SAIA!",7000)
+            Case LocationType.AirportDepart
+				GTA.UI.ShowSubtitle("Passenger: Catching a flight from SAIA in a few hours.",7000)
+            Case LocationType.HotelLS
+				GTA.UI.ShowSubtitle("Passenger: Staying at " & Destination.name & ".",7000)
+            Case LocationType.Residential
+				GTA.UI.ShowSubtitle("Passenger: " & UI_Destination & ", please.",7000)
+            Case LocationType.Entertainment
+				GTA.UI.ShowSubtitle("Passenger: Meeting friends at " & UI_Destination & ".",7000)
+            Case LocationType.Bar
+				GTA.UI.ShowSubtitle("Passenger: Ever get fucked up at " & UI_Destination & "?",7000) 
+            Case LocationType.FastFood
+				GTA.UI.ShowSubtitle("Passenger: Hot Sauce, check. Pepto, check. Driver, to " & UI_Destination & "!",7000)  
+            Case LocationType.Restaurant
+				GTA.UI.ShowSubtitle("Passenger: Do you know what " & UI_Destination & " has for gluten free?",7000)
+            Case LocationType.MotelLS
+				GTA.UI.ShowSubtitle("Passenger: Have a room at the " & UI_Destination & ".",7000)
+            Case LocationType.Religious
+				GTA.UI.ShowSubtitle("Passenger: Volunteering at the " & UI_Destination & ".",7000)
+            Case LocationType.Shopping
+				GTA.UI.ShowSubtitle("Passenger: Got a Groupon for " & UI_Destination & " - ever been?",7000)
+				'GTA.UI.ShowSubtitle("Passenger: Need a few things at " & UI_Destination & ".",7000)
+            Case LocationType.Sport
+				GTA.UI.ShowSubtitle("Passenger: Meeting some friends at " & UI_Destination & ".",7000)
+            Case LocationType.Office
+				GTA.UI.ShowSubtitle("Passenger: " & UI_Destination & ", please.",7000)
+            Case LocationType.Theater
+				GTA.UI.ShowSubtitle("Passenger: Do you know if the 3D sucks at " & UI_Destination & "?",7000)
+            Case LocationType.School
+				GTA.UI.ShowSubtitle("Passenger: Headed to " & UI_Destination & ".",7000)
+            Case LocationType.Factory
+				GTA.UI.ShowSubtitle("Passenger: My shift at " & UI_Destination & " starts soon.",7000)
+		End Select
         MiniGameStage = MiniGameStages.DrivingToDestination
     End Sub
 
@@ -1771,13 +2001,58 @@ Public Class EnhancedTaxiMissions
             End If
         End If
 
-        payPlayer(FareTotal)
-        GTA.UI.Notify("Fare earned: $" & FareTotal)
+        'payPlayer(FareTotal)
+        'GTA.UI.Notify("Fare earned: $" & FareTotal)
+		
+		' EDITED
+		
+		' calculate bonus, construct bonus msg
+		consecutiveFares += 1
+		PRINT(consecutiveFares)
+		calculateBonus()
 
+		' $FARETOTAL + $TIP - X MORE UNTIL NEXT BONUS
+		' $FARETOTAL ($OG_FARETOTAL * BLITZMULTIPLIER) + $TIP - X MORE UNTIL NEXT BONUS
+		' $FARETOTAL ($OG_FARETOTAL * BLITZMULTIPLIER) (late arrival, no tip!) - X MORE UNTIL NEXT BONUS
+		' $FARETOTAL (late arrival, no tip!) - X MORE UNTIL NEXT BONUS
+		'
+		' FARE TIP BONUS
+		'
+		' ( FARE / FARE * BONUS ) ( TIP / NO TIP MSG ) BONUS MSG
+		'
+        ' calculate blitz fare, construct fare msg
+		dim fareMessageChunk As String
+		If isBlitzPricing = True
+			fareMessageChunk = "~g~$" & FareTotal * blitzMultiplier & " ($" & FareTotal & "x" & blitzMultiplier & ")"
+			FareTotal = FareTotal * blitzMultiplier
+		Else
+			fareMessageChunk = "~g~$" & FareTotal
+		End If
+
+        'calculate tip, construct tip msg, pay out
+		dim tipMessageChunk As String
         If FareTip > 0 Then
-            payPlayer(FareTip)
-            GTA.UI.Notify("Tip received: $" & FareTip & "  (" & Math.Round(FareTipPercent * 100) & "%)")
+            'GTA.UI.Notify("Tip received: $" & FareTip & "  (" & Math.Round(FareTipPercent * 100) & "%)")
+			tipMessageChunk = "+ $" & FareTip & "  ~b~(" & Math.Round(FareTipPercent * 100) & "%) "
+		Else
+			tipMessageChunk = "~b~(late arrival, no tip!)"
         End If
+		GTA.UI.ShowSubtitle(fareMessageChunk & " " & tipMessageChunk & " " & BonusMsg, 7000)
+		'dim payTotal As Integer = ( FareTotal * blitzMultiplier ) + FareTip
+		TotalEarned += ((FareTotal * blitzMultiplier) + FareTip) + FareBonus
+		PayPlayer((FareTotal * blitzMultiplier)+FareTip)
+		PayPlayer(FareBonus)
+
+		
+		'GTA.Native.Function.Call(Native.Hash._CREATE_LIGHTNING_THUNDER)
+		'GTA.Native.Function.Call(Native.Hash.PLAY_SOUND_FRONTEND, -1, "SCREEN_FLASH", "CELEBRATION_SOUNDSET", 1)
+		'suck GTA.Native.Function.Call(Native.Hash.PLAY_SOUND_FRONTEND, -1, "MP_WAVE_COMPLETE", "HUD_FRONTEND_DEFAULT_SOUNDSET", 1)
+		GTA.Native.Function.Call(Native.Hash.PLAY_SOUND_FRONTEND, -1, "Mission_Pass_Notify", "DLC_HEISTS_GENERAL_FRONTEND_SOUNDS", 1)
+
+		If Game.GameTime > BlitzEndTime
+			isBlitzPricing = False
+			blitzMultiplier = 1
+		End If
 
         If doAutosave = True Then
             GTA.Native.Function.Call(Native.Hash.DO_AUTO_SAVE)
@@ -2712,4 +2987,3 @@ End Module
 'CHECK IF PLAYER IS DEAD
 'CHECK IF PLAYER IS WANTED
 'DISABLE OTHER MISSION MARKERS / TRIGGERS WHEN THIS MINIGAME IS ACTIVE
-
